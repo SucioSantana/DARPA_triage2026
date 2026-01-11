@@ -1,0 +1,321 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>DARPA Rescue Drone Dashboard</title>
+
+  <!-- Leaflet -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+
+  <style>
+    body {
+      margin: 0;
+      background: #000;
+      color: #fff;
+      font-family: monospace;
+      overflow: hidden;
+      display: flex;
+    }
+
+    /* CAMERA WALL */
+    #camera-wall {
+      width: 50%;
+      height: 100vh;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      grid-template-rows: 1fr 1fr 1.2fr;
+      gap: 4px;
+      padding: 4px;
+      box-sizing: border-box;
+    }
+
+    .cam-tile {
+      position: relative;
+      background: #111;
+      border: 1px solid #222;
+      overflow: hidden;
+    }
+
+    .cam-tile img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      background: #000;
+    }
+
+    .cam-tile.primary { grid-column: 1 / span 2; }
+
+    .cam-label {
+      position: absolute;
+      top: 4px;
+      left: 6px;
+      font-size: 12px;
+      background: rgba(0,0,0,0.6);
+      padding: 2px 6px;
+      border-radius: 4px;
+      z-index: 10;
+    }
+
+    /* MAP */
+    #map {
+      width: 50%;
+      height: 100vh;
+    }
+
+    /* CONTROLS */
+    #controls {
+      position: fixed;
+      top: 12px;
+      left: 12px;
+      display: flex;
+      gap: 8px;
+      z-index: 1000;
+    }
+
+    .btn {
+      background: rgba(0,0,0,0.7);
+      border: 1px solid #444;
+      color: #fff;
+      padding: 8px 12px;
+      cursor: pointer;
+      border-radius: 4px;
+    }
+
+    .btn:hover { background: rgba(40,40,40,0.9); }
+
+    #stop-btn {
+      background: #7b0000;
+      border: 2px solid #ff4444;
+      font-weight: bold;
+    }
+
+    #stop-btn:hover { background: #b00000; }
+
+    /* PANELS */
+    #ip-panel, #drone-panel, #casualty-panel {
+      position: fixed;
+      background: rgba(0,0,0,0.55);
+      padding: 10px 12px;
+      border-radius: 6px;
+      min-width: 220px;
+      z-index: 1000;
+    }
+
+    #ip-panel { bottom: 14px; right: 14px; }
+  
+/* Drone Status Panel */
+#drone-panel {
+  position: fixed;
+  top: 140px;  /* moved further down from 80px to 140px */
+  right: 14px;
+  background: rgba(0, 0, 0, 0.55);
+  padding: 10px 12px;
+  border-radius: 6px;
+  min-width: 240px;
+  z-index: 1000;
+}
+
+
+    #casualty-panel { bottom: 14px; left: 14px; }
+
+    /* Logo */
+    #merc-logo {
+      position: fixed;
+      top: 12px;
+      right: 12px;
+      width: 180px;
+      opacity: 0.45;
+      z-index: 1000;
+      pointer-events: none;
+    }
+
+    /* Drone Status */
+    .drone-status { display: flex; align-items: center; margin-bottom: 6px; }
+    .status-indicator {
+      width: 12px; height: 12px; border-radius: 50%; margin-right: 8px;
+    }
+    .status-operational { background: #5cb85c; }
+    .status-disconnected { background: #d9534f; }
+    .status-unknown { background: #f0ad4e; }
+  </style>
+</head>
+<body>
+
+  <img id="merc-logo" src="assets/merc_logo.png" />
+
+  <!-- CONTROLS -->
+  <div id="controls">
+    <button class="btn" onclick="toggleFullscreen()">TACTICAL MODE</button>
+    <button id="stop-btn" class="btn" onclick="emergencyStop()">EMERGENCY STOP</button>
+  </div>
+
+  <!-- CAMERA WALL -->
+  <div id="camera-wall">
+    <div class="cam-tile">
+      <div class="cam-label">FRONT VIEW</div>
+      <img class="cam" />
+    </div>
+
+    <div class="cam-tile">
+      <div class="cam-label">REAR VIEW</div>
+      <img class="cam" />
+    </div>
+
+    <div class="cam-tile">
+      <div class="cam-label">LEFT VIEW</div>
+      <img class="cam" />
+    </div>
+
+    <div class="cam-tile">
+      <div class="cam-label">RIGHT VIEW</div>
+      <img class="cam" />
+    </div>
+
+    <div class="cam-tile primary">
+      <div class="cam-label">TOP VIEW (PRIMARY)</div>
+      <img class="cam" />
+    </div>
+  </div>
+
+  <!-- MAP -->
+  <div id="map"></div>
+
+  <!-- PANELS -->
+  <div id="ip-panel">
+    <strong>Operator Location</strong>
+    <div id="ip-info">Resolving…</div>
+  </div>
+
+  <div id="casualty-panel">
+    <strong>Casualties</strong>
+    <div>• Awaiting detections<br>• No active triage</div>
+  </div>
+
+  <div id="drone-panel">
+    <strong>Drone Status</strong>
+    <div id="drone-status-list">
+      <div class="drone-status">
+        <div class="status-indicator status-unknown"></div>
+        <span>DRONE-01: Unknown</span>
+      </div>
+    </div>
+    <div><strong>Altitude:</strong> <span id="drone-alt">0 m</span></div>
+    <div><strong>Mission Time:</strong> <span id="mission-timer">00:00:00</span></div>
+  </div>
+
+  <script>
+    /* ===== MAP ===== */
+    const map = L.map('map').setView([20,0],2);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{ maxZoom:19 }).addTo(map);
+
+    let ipMarker = null;
+    async function loadIpLocation() {
+      try {
+        const res = await fetch('/ip_location');
+        const data = await res.json();
+        if(!data.lat || !data.lon) return;
+
+        if(ipMarker) map.removeLayer(ipMarker);
+        ipMarker = L.marker([data.lat,data.lon]).addTo(map);
+        ipMarker.bindPopup(`<b>Operator Location</b><br>${data.city}, ${data.region}, ${data.country}`).openPopup();
+
+        map.flyTo([data.lat,data.lon], 8, {duration: 1.0});
+
+        document.getElementById('ip-info').innerHTML = `
+          IP: ${data.ip}<br>
+          ${data.city}, ${data.region}<br>
+          ${data.country}<br>
+          Lat: ${data.lat.toFixed(4)}<br>
+          Lon: ${data.lon.toFixed(4)}
+        `;
+      } catch(e){ console.error('IP location error', e); document.getElementById('ip-info').innerText='Error'; }
+    }
+    loadIpLocation();
+
+    /* ===== CASUALTY MARKERS ===== */
+    const casualtyMarkers = [];
+    async function loadCasualtyLocations() {
+      try {
+        const res = await fetch('/casualty_locations');
+        const casualties = await res.json();
+        casualtyMarkers.forEach(m=>map.removeLayer(m)); casualtyMarkers.length=0;
+        casualties.forEach(c=>{
+          const radius=L.circle([c.x,c.y],{color:'blue',fillColor:'blue',fillOpacity:0.2,radius:c.confidence_radius||50}).addTo(map);
+          const marker=L.circleMarker([c.x,c.y],{color:'red',radius:8}).addTo(map);
+          marker.bindPopup(`Casualty at (${c.x.toFixed(4)}, ${c.y.toFixed(4)})`);
+          casualtyMarkers.push(radius,marker);
+        });
+      } catch(e){ console.error('Failed to load casualty locations', e); }
+    }
+    setInterval(loadCasualtyLocations,2000);
+    loadCasualtyLocations();
+
+    /* ===== DRONE STATUS ===== */
+    async function updateDroneStatus() {
+      try {
+        const res = await fetch('/drone_status');
+        const statuses = await res.json();
+        const statusList = document.getElementById('drone-status-list');
+        statusList.innerHTML = '';
+        const status = statuses[0] || 'unknown';
+        const div=document.createElement('div'); div.className='drone-status';
+        const indicator=document.createElement('div'); indicator.className='status-indicator';
+        if(status==='operational') indicator.classList.add('status-operational');
+        else if(status==='disconnected') indicator.classList.add('status-disconnected');
+        else indicator.classList.add('status-unknown');
+        const label=document.createElement('span');
+        label.textContent=`DRONE-01: ${status.charAt(0).toUpperCase()+status.slice(1)}`;
+        div.appendChild(indicator); div.appendChild(label);
+        statusList.appendChild(div);
+      } catch(e){ console.error('Drone status error', e); }
+    }
+    setInterval(updateDroneStatus,2000);
+    updateDroneStatus();
+
+    /* ===== CAMERA WALL ===== */
+    const camImgs = document.querySelectorAll('.cam');
+    const cameraEndpoints = ['/image/drone1','/image/drone2','/image/drone3','/image/drone4','/image/drone5'];
+    async function refreshCameras() {
+      camImgs.forEach((img,index)=>{
+        fetch(cameraEndpoints[index])
+          .then(res=>{ if(!res.ok) throw Error(`Camera ${index+1} failed`); return res.blob(); })
+          .then(blob=>{ img.src=URL.createObjectURL(blob); })
+          .catch(err=>console.error('Camera error:', err));
+      });
+    }
+    setInterval(refreshCameras,300);
+    refreshCameras();
+
+    /* ===== TELEMETRY ===== */
+    async function updateDroneTelemetry() {
+      try {
+        const res = await fetch('/drone_telemetry');
+        const data = await res.json();
+        if(data.altitude) document.getElementById('drone-alt').innerText = `${data.altitude.toFixed(1)} m`;
+      } catch(e){ console.error('Drone telemetry error', e); }
+    }
+    setInterval(updateDroneTelemetry,1000);
+    updateDroneTelemetry();
+
+    /* ===== MISSION TIMER ===== */
+    async function refreshMissionTime() {
+      try {
+        const res = await fetch('/mission_time');
+        const t = await res.json();
+        const pad = n=>String(n).padStart(2,'0');
+        document.getElementById('mission-timer').innerText=`${pad(t.hours)}:${pad(t.minutes)}:${pad(t.seconds)}`;
+      } catch(e){ console.error('Mission timer error', e); }
+    }
+    setInterval(refreshMissionTime,1000);
+    refreshMissionTime();
+
+    /* ===== CONTROLS ===== */
+    function toggleFullscreen() { if(!document.fullscreenElement) document.documentElement.requestFullscreen(); else document.exitFullscreen(); }
+    //replace this message with the method to have an emergency stop command sent to the drone 
+    function emergencyStop() { alert('EMERGENCY STOP ACTIVATED'); }
+
+  </script>
+
+</body>
+</html>
