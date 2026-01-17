@@ -274,18 +274,37 @@
     updateDroneStatus();
 
     /* ===== CAMERA WALL ===== */
-    const camImgs = document.querySelectorAll('.cam');
-    const cameraEndpoints = ['/image/drone1','/image/drone2','/image/drone3','/image/drone4','/image/drone5'];
-    async function refreshCameras() {
-      camImgs.forEach((img,index)=>{
-        fetch(cameraEndpoints[index])
-          .then(res=>{ if(!res.ok) throw Error(`Camera ${index+1} failed`); return res.blob(); })
-          .then(blob=>{ img.src=URL.createObjectURL(blob); })
-          .catch(err=>console.error('Camera error:', err));
-      });
+const camImgs = document.querySelectorAll('.cam');
+const staticImage = '/assets/static_view.jpg'; // your attached image
+const liveCameraEndpoint = '/image/drone5';    // TOP VIEW (PRIMARY)
+
+async function refreshCameras() {
+  camImgs.forEach((img, index) => {
+
+    // Front, Rear, Left, Right → static image
+    if (index < 4) {
+      if (img.src !== staticImage) {
+        img.src = staticImage;
+      }
+      return;
     }
-    setInterval(refreshCameras,300);
-    refreshCameras();
+
+    // Top View (Primary) → live ROS feed
+    fetch(liveCameraEndpoint)
+      .then(res => {
+        if (!res.ok) throw Error('Primary camera failed');
+        return res.blob();
+      })
+      .then(blob => {
+        img.src = URL.createObjectURL(blob);
+      })
+      .catch(err => console.error('Primary camera error:', err));
+  });
+}
+
+setInterval(refreshCameras, 300);
+refreshCameras();
+
 
     /* ===== TELEMETRY ===== */
     async function updateDroneTelemetry() {
