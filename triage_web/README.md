@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 # DARPA_triage2026
 =======
 Requirements
